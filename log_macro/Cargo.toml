@@ -7,7 +7,10 @@ edition = "2021"
 proc-macro = true
 
 [dependencies]
+log = { path = "../log" }
 syn = { version = "1.0", features = ["full"] }
 quote = "1.0"
 proc-macro2 = "1.0"
 lazy_static = "1.4.0"
+constructor = "*"
+inventory = "*"
