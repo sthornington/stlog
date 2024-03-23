@@ -1,15 +1,13 @@
+#![feature(proc_macro_span)]
 extern crate proc_macro;
 
-use proc_macro::{Literal, TokenStream};
+use proc_macro::{Literal, Span, TokenStream};
 
 use quote::{quote, format_ident};
 use syn::{parse_macro_input, LitStr, parse::Parse, parse::ParseStream, Token, Expr, Ident, LitInt};
 use constructor::constructor;
 
 struct LogMacroInput {
-    file: LitStr,
-    line: LitInt,
-    col: LitInt,
     level: Ident,
     format_str: LitStr,
     args: Vec<Expr>,
@@ -17,14 +15,8 @@ struct LogMacroInput {
 
 impl syn::parse::Parse for LogMacroInput {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let file: LitStr = input.parse()?;
-        input.parse::<Token![,]>()?;
-        let line: LitInt = input.parse()?;
-        input.parse::<Token![,]>()?;
-        let col: LitInt = input.parse()?;
-        input.parse::<Token![,]>()?;
-        println!("PARSE {} {} {}", file.value(), line, col);
         let level: Ident = input.parse()?;
+        input.parse::<Token![,]>()?;
         let format_str: LitStr = input.parse()?;
         let mut args = Vec::new();
 
@@ -34,14 +26,38 @@ impl syn::parse::Parse for LogMacroInput {
             args.push(arg);
         }
 
-        Ok(LogMacroInput { file, line, col, level, format_str, args })
+        Ok(LogMacroInput { level, format_str, args })
     }
 }
 
-
+/*
+    * This macro generates the code to log data, by packing the args onto a queue and
+    * registering a closure to deserialize and log the data. Inspired by:
+    * https://www.reddit.com/r/rust/comments/15cm4ug/comment/jtxfttd/
+    *
+    * # Examples
+    *
+    * ```
+    * log_data!(INFO, "hi there {}", 5);
+    * ```
+    */
 #[proc_macro]
-pub fn log_data_impl(input: TokenStream) -> TokenStream {
-    let LogMacroInput { file, line, col, level, format_str, args } = parse_macro_input!(input as LogMacroInput);
+pub fn log_data(input: TokenStream) -> TokenStream {
+    fn fnify(s: &str) -> String {
+        s.chars()
+            .map(|c| if c.is_alphanumeric() { c } else { '_' })
+            .collect()
+    }
+
+    let LogMacroInput { level, format_str, args } = parse_macro_input!(input as LogMacroInput);
+    let span = Span::call_site();
+    let source = span.source_file();
+    let file = fnify(source.path().to_str().unwrap());
+    let line = span.start().line();
+    let col = span.start().column();
+    let log_ident = format_ident!("logident_{}_{}_{}", file, line, col);
+    let log_ident_impl = format_ident!("logident_impl_{}_{}_{}", file, line, col);
+    let log_ident_str = format!("logident_{}_{}_{}", file, line, col);
 
     // Map the `Ident` to a LogLevel variant
     let level = match level.to_string().as_str() {
@@ -56,25 +72,39 @@ pub fn log_data_impl(input: TokenStream) -> TokenStream {
     let deserialize_and_log = quote! {
         println!("TODO: deserialize and log closure");
     };
-    println!("COMPILE {} {}", file.value(), line);
+    println!("COMPILE {}", log_ident);
     // Register static stuff
     let register = quote! {
-        let (file, line) = (file!(), line!());
-        println!("RUN {} {}", file, line);
-            /*
-        // TODO this is a function not a closure so it doesn't have format_str etc?
-        extern fn inner_register() {
-            let raw_func = log::RawFunc::new(move || {
-                println!("TODO: deserialize and log args here with fmt {}", #format_str);
-            });
-            log::LOG_LINE_SPECS.lock().unwrap().push(log::LogLineSpec { level: #level, fmt: #format_str, fmt_fn: raw_func } );
+        // taken from constructor crate, but without the super:: since our function is local
+        pub mod #log_ident {
+            #![allow(non_snake_case)]
+            #![allow(dead_code)]
+            #![allow(non_upper_case_globals)]
+            #![deny(private_no_mangle_statics /* >>> constructor must be used from a pub mod <<< */)]
+
+            pub extern "C" fn #log_ident_impl() {
+                println!("{} was called, original fmt: \"{}\"", #log_ident_str, #format_str);
+                // TODO: Lock the specs vec, the index will be this log's dense id. Store that
+                // TODO: in the serialization code SOMEHOW so it can push the args with a good
+                // TODO: dense id.
+                let fmt_str_copy = #format_str.clone();
+                let raw_func = log::RawFunc::new(move || { println!("TODO: deserialize and log args here with fmt {}", #format_str); } );
+                log::LOG_LINE_SPECS.lock().unwrap().push(log::LogLineSpec { level: #level, fmt: #format_str, log_ident: #log_ident_str, fmt_fn: raw_func } );
+            }
+            #[cfg(target_os = "linux")]
+            #[link_section = ".ctors"]
+            #[no_mangle]
+            pub static #log_ident: extern fn() = #log_ident_impl;
+            #[cfg(target_os = "macos")]
+            #[link_section = "__DATA,__mod_init_func"]
+            #[no_mangle]
+            pub static #log_ident: extern fn() = #log_ident_impl;
         }
-        constructor!(inner_register);
-*/
     };
     // Generate serialization code
     let serialize = quote! {
-        println!("TODO: serialize args here")
+        println!("TODO: serialize id and args here");
+        println!(#format_str, #(#args),*);
     };
 
 

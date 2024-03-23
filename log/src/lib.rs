@@ -32,6 +32,7 @@ impl RawFunc {
 pub struct LogLineSpec {
     pub level: LogLevel,
     pub fmt: &'static str,
+    pub log_ident: &'static str,
     pub fmt_fn: RawFunc
 }
 
