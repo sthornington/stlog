@@ -82,6 +82,8 @@ pub fn log_data(input: TokenStream) -> TokenStream {
             #![allow(non_upper_case_globals)]
             #![deny(private_no_mangle_statics /* >>> constructor must be used from a pub mod <<< */)]
 
+            static idx: AtomicI32 = AtomicI32::new(-1);
+
             pub extern "C" fn #log_ident_impl() {
                 println!("{} was called, original fmt: \"{}\"", #log_ident_str, #format_str);
                 // TODO: Lock the specs vec, the index will be this log's dense id. Store that
@@ -89,7 +91,12 @@ pub fn log_data(input: TokenStream) -> TokenStream {
                 // TODO: dense id.
                 let fmt_str_copy = #format_str.clone();
                 let raw_func = log::RawFunc::new(move || { println!("TODO: deserialize and log args here with fmt {}", #format_str); } );
-                log::LOG_LINE_SPECS.lock().unwrap().push(log::LogLineSpec { level: #level, fmt: #format_str, log_ident: #log_ident_str, fmt_fn: raw_func } );
+                let locked_vec = log::LOG_LINE_SPECS.lock().unwrap();
+                if (idx.compare_exchange(-1, locked_vec.size(), Ordering::Acquire, Ordering::Relaxed) != -1) {
+                    panic!("stlog call site at {}:{}:{} has already been initialized!", #file, #line, #col);
+                }
+                // local call site now has the correct vec index of this call site which it can pack into its messages
+                locked_vec.push(log::LogLineSpec { level: #level, fmt: #format_str, log_ident: #log_ident_str, fmt_fn: raw_func } );
             }
             #[cfg(target_os = "linux")]
             #[link_section = ".ctors"]
