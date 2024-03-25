@@ -2,7 +2,6 @@
 extern crate proc_macro;
 
 use proc_macro::{Literal, Span, TokenStream};
-
 use quote::{quote, format_ident};
 use syn::{parse_macro_input, LitStr, parse::Parse, parse::ParseStream, Token, Expr, Ident, LitInt};
 use constructor::constructor;
@@ -52,7 +51,8 @@ pub fn log_data(input: TokenStream) -> TokenStream {
     let LogMacroInput { level, format_str, args } = parse_macro_input!(input as LogMacroInput);
     let span = Span::call_site();
     let source = span.source_file();
-    let file = fnify(source.path().to_str().unwrap());
+    let path = source.path().to_str().unwrap().to_string();
+    let file = fnify(&path);
     let line = span.start().line();
     let col = span.start().column();
     let log_ident = format_ident!("logident_{}_{}_{}", file, line, col);
@@ -81,8 +81,9 @@ pub fn log_data(input: TokenStream) -> TokenStream {
             #![allow(dead_code)]
             #![allow(non_upper_case_globals)]
             #![deny(private_no_mangle_statics /* >>> constructor must be used from a pub mod <<< */)]
+            use std::sync::atomic::{AtomicI32, Ordering};
 
-            static idx: AtomicI32 = AtomicI32::new(-1);
+            pub static idx: AtomicI32 = AtomicI32::new(-1);
 
             pub extern "C" fn #log_ident_impl() {
                 println!("{} was called, original fmt: \"{}\"", #log_ident_str, #format_str);
@@ -91,9 +92,12 @@ pub fn log_data(input: TokenStream) -> TokenStream {
                 // TODO: dense id.
                 let fmt_str_copy = #format_str.clone();
                 let raw_func = log::RawFunc::new(move || { println!("TODO: deserialize and log args here with fmt {}", #format_str); } );
-                let locked_vec = log::LOG_LINE_SPECS.lock().unwrap();
-                if (idx.compare_exchange(-1, locked_vec.size(), Ordering::Acquire, Ordering::Relaxed) != -1) {
-                    panic!("stlog call site at {}:{}:{} has already been initialized!", #file, #line, #col);
+                let mut locked_vec = log::LOG_LINE_SPECS.lock().unwrap();
+                let next_id = locked_vec.len() as i32;
+                if let Err(prev) = idx.compare_exchange(-1, next_id, Ordering::Acquire, Ordering::Relaxed) {
+                    panic!("stlog call site at {}:{}:{} has already been initialized to {}!", #path, #line, #col, prev);
+                } else {
+                    println!("stlog call site at {}:{}:{} successfully initialized with id {}!", #path, #line, #col, next_id);
                 }
                 // local call site now has the correct vec index of this call site which it can pack into its messages
                 locked_vec.push(log::LogLineSpec { level: #level, fmt: #format_str, log_ident: #log_ident_str, fmt_fn: raw_func } );
@@ -110,7 +114,7 @@ pub fn log_data(input: TokenStream) -> TokenStream {
     };
     // Generate serialization code
     let serialize = quote! {
-        println!("TODO: serialize id and args here");
+        println!("TODO: serialize id {} and args here", #log_ident::idx.load(std::sync::atomic::Ordering::Relaxed));
         println!(#format_str, #(#args),*);
     };
 
