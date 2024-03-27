@@ -5,18 +5,15 @@ extern crate log_macro;
 use std::fmt::Debug;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-
-fn get_tuple(a: impl log::RemoteDebug, b: impl log::RemoteDebug) -> (impl log::RemoteDebug, impl log::RemoteDebug) {
-    (a,b)
-}
+use log::Loggable;
 
 fn main() {
 //    let (a,b) = gen_tuple();
 //    log_data!(INFO, "a: {:?}, b: {:?}", a, b);
-    let a = 1;
-    let b = 2;
-    let t = get_tuple(a,b);
-    println!("t: {:?}", t);
-//    log_data!(INFO, "1: {:?}, 2: {:?}", 1, 2);
+    let a: i64 = 1;
+    let b: f64 = 2.0;
+    let t2: (Loggable, Loggable) = (a.into(), b.into());
 
+    println!("t2: {:?}", t2);
+    log_data!(INFO, "FOO 1: {:?}, 2: {:?}", 1, 2.0);
 }

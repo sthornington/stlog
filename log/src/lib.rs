@@ -5,9 +5,10 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::thread;
 use lazy_static::lazy_static;
 use core_affinity;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use serde_derive::{Deserialize, Serialize};
 
 #[derive(Debug)]
 pub enum LogLevel {
@@ -16,7 +17,6 @@ pub enum LogLevel {
     WARN,
     ERROR,
 }
-
 
 pub struct RawFunc {
     data: Box<dyn Fn() + Send + 'static>,
@@ -77,6 +77,29 @@ pub fn init_logger(id: usize) {
     });
 }
 
-pub trait RemoteDebug: Serialize + DeserializeOwned + Debug {}
-impl<T> RemoteDebug for T where T: Serialize + DeserializeOwned + Debug {}
+#[derive(Serialize, Deserialize, Debug)]
+pub enum Loggable {
+    I64(i64),
+    F64(f64),
+}
 
+impl From<f64> for Loggable {
+    fn from(item: f64) -> Self {
+        Loggable::F64(item)
+    }
+}
+
+impl From<i64> for Loggable {
+    fn from(item: i64) -> Self {
+        Loggable::I64(item)
+    }
+}
+
+impl Display for Loggable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Loggable::I64(i) => write!(f, "{}", i),
+            Loggable::F64(i) => write!(f, "{}", i),
+        }
+    }
+}

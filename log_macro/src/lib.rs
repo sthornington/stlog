@@ -73,13 +73,18 @@ pub fn log_data(input: TokenStream) -> TokenStream {
     let deserialize_and_log = quote! {
         println!("TODO: deserialize and log closure");
     };
-    println!("COMPILE {}", log_ident);
-    println!("COMPILE args len {:?}", args.len());
+    println!("COMPILE {:?}", log_ident);
+    //println!("COMPILE args len {:?}", args.len());
 
-    let tuple_args = args.iter().enumerate().map(|(i, _)| {
-        quote! { impl log::RemoteDebug }
-    }).collect::<Vec<_>>();
-    println!("COMPILE tuple_args len {:?}", tuple_args.len());
+    let tuple_types = args.iter().map(|_| {quote! { Loggable }}).collect::<Vec<_>>();
+    //println!("COMPILE tuple_args len {:?}", tuple_args.len());
+
+    // just the args variadic identifiers
+    let vars = (0..args.len()).map(|i| format_ident!("var{}", i)).collect::<Vec<_>>();
+
+    let tuple_args_into = args.iter().map(|x| {
+        quote! { #x.into() }
+    });
 
     // Register static stuff
     let register = quote! {
@@ -96,8 +101,6 @@ pub fn log_data(input: TokenStream) -> TokenStream {
             #![deny(private_no_mangle_statics /* >>> constructor must be used from a pub mod <<< */)]
             use std::sync::atomic::{AtomicI32, Ordering};
             use std::cell::OnceCell;
-
-            pub type tuple_type = ( #( #tuple_args ),* );
 
             pub static idx: AtomicI32 = AtomicI32::new(-1);
 
@@ -125,12 +128,24 @@ pub fn log_data(input: TokenStream) -> TokenStream {
             pub static #log_ident: extern fn() = #log_ident_impl;
         }
     };
+
     // Generate serialization code
     let serialize = quote! {
-        println!("TODO: serialize id {} and args here", #log_ident::idx.load(std::sync::atomic::Ordering::Relaxed));
-        let t = #log_ident::tuple_type ( #(#args),* );
-        println!("{:?}", t);
+        let idx = #log_ident::idx.load(std::sync::atomic::Ordering::Relaxed);
+        assert!(idx >= 0);
+        println!("TODO: serialize id {} and args here", idx);
+        let t: ( i32, #( #tuple_types ),* ) = ( idx, #( #tuple_args_into ),* );
+        println!("RUN {:?}", t);
         println!(#format_str, #(#args),*);
+
+        let serialized = bincode::serialize(&t).expect("Serialization failed");
+        println!("Serialized data: {:?}", serialized);
+
+        // Deserialize the tuple
+        let (idx2, #(#vars),*) : ( i32, #(#tuple_types),* ) = bincode::deserialize(&serialized).unwrap();
+
+        //println!("RUN {:?} {:?}", idx2, #(#vars),* );
+        println!(#format_str, #(#vars),* );
     };
 
 
