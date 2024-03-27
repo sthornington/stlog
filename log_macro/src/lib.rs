@@ -1,4 +1,5 @@
 #![feature(proc_macro_span)]
+#![feature(type_alias_impl_trait)]
 extern crate proc_macro;
 
 use proc_macro::{Literal, Span, TokenStream};
@@ -73,8 +74,20 @@ pub fn log_data(input: TokenStream) -> TokenStream {
         println!("TODO: deserialize and log closure");
     };
     println!("COMPILE {}", log_ident);
+    println!("COMPILE args len {:?}", args.len());
+
+    let tuple_args = args.iter().enumerate().map(|(i, _)| {
+        quote! { impl log::RemoteDebug }
+    }).collect::<Vec<_>>();
+    println!("COMPILE tuple_args len {:?}", tuple_args.len());
+
     // Register static stuff
     let register = quote! {
+        use std::fmt::Debug;
+        use serde::de::DeserializeOwned;
+        use serde::Serialize;
+
+
         // taken from constructor crate, but without the super:: since our function is local
         pub mod #log_ident {
             #![allow(non_snake_case)]
@@ -82,25 +95,25 @@ pub fn log_data(input: TokenStream) -> TokenStream {
             #![allow(non_upper_case_globals)]
             #![deny(private_no_mangle_statics /* >>> constructor must be used from a pub mod <<< */)]
             use std::sync::atomic::{AtomicI32, Ordering};
+            use std::cell::OnceCell;
+
+            pub type tuple_type = ( #( #tuple_args ),* );
 
             pub static idx: AtomicI32 = AtomicI32::new(-1);
 
             pub extern "C" fn #log_ident_impl() {
-                println!("{} was called, original fmt: \"{}\"", #log_ident_str, #format_str);
+//                println!("{} was called, original fmt: \"{}\"", #log_ident_str, #format_str);
                 // TODO: Lock the specs vec, the index will be this log's dense id. Store that
                 // TODO: in the serialization code SOMEHOW so it can push the args with a good
                 // TODO: dense id.
                 let fmt_str_copy = #format_str.clone();
                 let raw_func = log::RawFunc::new(move || { println!("TODO: deserialize and log args here with fmt {}", #format_str); } );
-                let mut locked_vec = log::LOG_LINE_SPECS.lock().unwrap();
-                let next_id = locked_vec.len() as i32;
-                if let Err(prev) = idx.compare_exchange(-1, next_id, Ordering::Acquire, Ordering::Relaxed) {
-                    panic!("stlog call site at {}:{}:{} has already been initialized to {}!", #path, #line, #col, prev);
+                let id = log::add_log_line_spec(log::LogLineSpec { level: #level, fmt: fmt_str_copy, log_ident: #log_ident_str, fmt_fn: raw_func, sender: OnceCell::new() });
+                if let Err(prev) = idx.compare_exchange(-1, id as i32, Ordering::Acquire, Ordering::Relaxed) {
+                    panic!("log call site at {}:{}:{} has already been initialized to {}!", #path, #line, #col, prev);
                 } else {
-                    println!("stlog call site at {}:{}:{} successfully initialized with id {}!", #path, #line, #col, next_id);
+                    println!("log call site at {}:{}:{} successfully initialized with id {}!", #path, #line, #col, id);
                 }
-                // local call site now has the correct vec index of this call site which it can pack into its messages
-                locked_vec.push(log::LogLineSpec { level: #level, fmt: #format_str, log_ident: #log_ident_str, fmt_fn: raw_func } );
             }
             #[cfg(target_os = "linux")]
             #[link_section = ".ctors"]
@@ -115,6 +128,8 @@ pub fn log_data(input: TokenStream) -> TokenStream {
     // Generate serialization code
     let serialize = quote! {
         println!("TODO: serialize id {} and args here", #log_ident::idx.load(std::sync::atomic::Ordering::Relaxed));
+        let t = #log_ident::tuple_type ( #(#args),* );
+        println!("{:?}", t);
         println!(#format_str, #(#args),*);
     };
 
