@@ -45,12 +45,23 @@ pub struct LogLineSpec {
     pub sender: OnceCell<Sender<Msg>>,
 }
 
-type Msg = String;
+const MAX_SIZE: usize = 32;
+
+// TODO: switch to channel that can do variable size messages
+#[derive(Debug)]
+pub struct Msg {
+    pub data: [u8; MAX_SIZE],
+}
+
+impl Msg {
+    pub fn new() -> Self {
+        Msg { data: [0; MAX_SIZE] }
+    }
+}
 
 lazy_static! {
     pub static ref LOG_LINE_SPECS: Arc<Mutex<Vec<LogLineSpec>>> = Arc::new(Mutex::new(Vec::new()));
 }
-
 
 pub fn add_log_line_spec(spec: LogLineSpec) -> usize {
     let mut locked_vec = LOG_LINE_SPECS.lock().unwrap();
@@ -61,7 +72,7 @@ pub fn add_log_line_spec(spec: LogLineSpec) -> usize {
 pub fn init_logger(id: usize) {
     println!("init_logger called with cpu {}", id);
     let core_id = core_affinity::CoreId { id };
-    let (tx, rx): (mpsc::Sender<String>, Receiver<String>) = mpsc::channel();
+    let (tx, rx): (mpsc::Sender<Msg>, Receiver<Msg>) = mpsc::channel();
 
     // TODO can we find a way to share the sender so that each log line doesn't need the 8 bytes to do it?
     for spec in LOG_LINE_SPECS.lock().unwrap().iter_mut() {
@@ -72,7 +83,7 @@ pub fn init_logger(id: usize) {
         core_affinity::set_for_current(core_id);
 
         for received in rx {
-            println!("Received: {}", received);
+            println!("Received: {:?}", received);
         }
     });
 }

@@ -101,8 +101,10 @@ pub fn log_data(input: TokenStream) -> TokenStream {
             #![deny(private_no_mangle_statics /* >>> constructor must be used from a pub mod <<< */)]
             use std::sync::atomic::{AtomicI32, Ordering};
             use std::cell::OnceCell;
+            use std::sync::mpsc::{Receiver, Sender};
 
             pub static idx: AtomicI32 = AtomicI32::new(-1);
+            pub static mut log_line_spec: Option<Sender<log::Msg>> = None;
 
             pub extern "C" fn #log_ident_impl() {
 //                println!("{} was called, original fmt: \"{}\"", #log_ident_str, #format_str);
@@ -138,14 +140,20 @@ pub fn log_data(input: TokenStream) -> TokenStream {
         println!("RUN {:?}", t);
         println!(#format_str, #(#args),*);
 
-        let serialized = bincode::serialize(&t).expect("Serialization failed");
-        println!("Serialized data: {:?}", serialized);
+        let mut msg = log::Msg::new();
+
+        //let serialized = bincode::serialize(&t).expect("Serialization failed");
+        {
+            bincode::serialize_into(&mut msg.data[..], &t).expect("Serialization failed");
+        }
+        println!("Serialized data: {:?}", msg);
+        #log_ident::log_line_spec.get_or_insert_with(|| { log::LOG_LINE_SPECS.lock().unwrap()[idx as usize].sender.get().unwrap().clone() }).send(msg);
 
         // Deserialize the tuple
-        let (idx2, #(#vars),*) : ( i32, #(#tuple_types),* ) = bincode::deserialize(&serialized).unwrap();
+        //let (idx2, #(#vars),*) : ( i32, #(#tuple_types),* ) = bincode::deserialize(&mut msg.data).unwrap();
 
         //println!("RUN {:?} {:?}", idx2, #(#vars),* );
-        println!(#format_str, #(#vars),* );
+        //println!(#format_str, #(#vars),* );
     };
 
 

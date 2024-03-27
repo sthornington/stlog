@@ -10,10 +10,10 @@ use log::Loggable;
 fn main() {
 //    let (a,b) = gen_tuple();
 //    log_data!(INFO, "a: {:?}, b: {:?}", a, b);
-    let a: i64 = 1;
-    let b: f64 = 2.0;
-    let t2: (Loggable, Loggable) = (a.into(), b.into());
+//    let a: i64 = 1;
+//    let b: f64 = 2.0;
+//    let t2: (Loggable, Loggable) = (a.into(), b.into());
 
-    println!("t2: {:?}", t2);
-    log_data!(INFO, "FOO 1: {:?}, 2: {:?}", 1, 2.0);
+//    println!("t2: {:?}", t2);
+    log_data!(INFO, "FOO 1: {:?}, 2: {:?}", 1, 2.1);
 }
