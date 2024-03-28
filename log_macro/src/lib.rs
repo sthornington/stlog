@@ -69,15 +69,8 @@ pub fn log_data(input: TokenStream) -> TokenStream {
         _ => panic!("Unsupported log level"),
     };
 
-    //println!("COMPILE {:?}", log_ident);
-    //println!("COMPILE args len {:?}", args.len());
-
     let tuple_types = args.iter().map(|_| {quote! { log::Loggable }}).collect::<Vec<_>>();
-    //println!("COMPILE tuple_args len {:?}", tuple_args.len());
-
-    // just the args variadic identifiers
     let vars = (0..args.len()).map(|i| format_ident!("var{}", i)).collect::<Vec<_>>();
-
     let tuple_args_into = args.iter().map(|x| {
         quote! { #x.into() }
     });
@@ -87,7 +80,6 @@ pub fn log_data(input: TokenStream) -> TokenStream {
         use std::fmt::Debug;
         use serde::de::DeserializeOwned;
         use serde::Serialize;
-
 
         // taken from constructor crate, but without the super:: since our function is local
         pub mod #log_ident {
@@ -103,10 +95,6 @@ pub fn log_data(input: TokenStream) -> TokenStream {
             pub static mut log_line_spec: Option<Sender<log::Msg>> = None;
 
             pub extern "C" fn #log_ident_impl() {
-//                println!("{} was called, original fmt: \"{}\"", #log_ident_str, #format_str);
-                // TODO: Lock the specs vec, the index will be this log's dense id. Store that
-                // TODO: in the serialization code SOMEHOW so it can push the args with a good
-                // TODO: dense id.
                 let fmt_str_copy = #format_str.clone();
                 let raw_func = log::RawFunc::new(move |msg| {
                     // Deserialize the tuple
@@ -117,8 +105,6 @@ pub fn log_data(input: TokenStream) -> TokenStream {
                 let id = log::add_log_line_spec(log::LogLineSpec { level: #level, fmt: fmt_str_copy, log_ident: #log_ident_str, fmt_fn: Some(raw_func) });
                 if let Err(prev) = idx.compare_exchange(-1, id as i32, Ordering::Acquire, Ordering::Relaxed) {
                     panic!("log call site at {}:{}:{} has already been initialized to {}!", #path, #line, #col, prev);
-                } else {
-                    //println!("log call site at {}:{}:{} successfully initialized with id {}!", #path, #line, #col, id);
                 }
             }
             #[cfg(target_os = "linux")]
@@ -134,20 +120,17 @@ pub fn log_data(input: TokenStream) -> TokenStream {
 
     // Generate serialization code
     let serialize = quote! {
+        // TODO: CHECK LOG LEVEL IN HERE AND DO NOTHING IF IT'S TOO LOW
         let idx = #log_ident::idx.load(std::sync::atomic::Ordering::Relaxed);
         assert!(idx >= 0);
-        //println!("TODO: serialize id {} and args here", idx);
         let t: ( i32, #( #tuple_types ),* ) = ( idx, #( #tuple_args_into ),* );
-        //println!("RUN {:?}", t);
-        //println!(#format_str, #(#args),*);
 
         let mut msg = log::Msg::new();
 
-        //let serialized = bincode::serialize(&t).expect("Serialization failed");
         {
+            assert!(bincode::serialized_size(&t).unwrap() < log::MAX_SIZE as u64, "Data too large to serialize");
             bincode::serialize_into(&mut msg.data[..], &t).expect("Serialization failed");
         }
-        //println!("Serialized data: {:?}", msg);
 
         log::THREAD_LOCAL_SENDER.with(|maybe_sender| {
             if maybe_sender.borrow().is_none() {
@@ -159,7 +142,6 @@ pub fn log_data(input: TokenStream) -> TokenStream {
         });
 
     };
-
 
     let output = quote! {
         {

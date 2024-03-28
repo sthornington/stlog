@@ -1,11 +1,11 @@
 #![feature(type_alias_impl_trait)]
 use std::cell::{OnceCell, RefCell};
-use std::sync::{Arc, mpsc, Mutex};
+use std::sync::{Arc, Condvar, mpsc, Mutex};
 use std::sync::mpsc::{Receiver, Sender};
 use std::thread;
 use lazy_static::lazy_static;
 use core_affinity;
-use std::fmt::{Debug, Display};
+use std::fmt::{Debug, Display, LowerExp};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_derive::{Deserialize, Serialize};
@@ -46,7 +46,7 @@ impl RawFunc {
     }
 
     fn invoke(&self, x: Msg) {
-        (self.data)(x)
+        (&self.data)(x)
     }
 }
 
@@ -57,7 +57,7 @@ pub struct LogLineSpec {
     pub fmt_fn: Option<RawFunc>,
 }
 
-const MAX_SIZE: usize = 32;
+pub const MAX_SIZE: usize = 256;
 
 lazy_static! {
     pub static ref LOG_LINE_SPECS: Arc<Mutex<Vec<LogLineSpec>>> = Arc::new(Mutex::new(Vec::new()));
@@ -76,6 +76,9 @@ pub fn add_log_line_spec(spec: LogLineSpec) -> usize {
 }
 
 pub fn init_logger(id: usize) {
+    let pair = Arc::new((Mutex::new(false), Condvar::new()));
+    let pair_clone = pair.clone();
+    // TODO guard against multiple calls
     println!("init_logger called with cpu {}", id);
     let core_id = core_affinity::CoreId { id };
     let (tx, rx): (mpsc::Sender<Msg>, Receiver<Msg>) = mpsc::channel();
@@ -87,16 +90,26 @@ pub fn init_logger(id: usize) {
         // peel out all the formatting closures
         let fns = LOG_LINE_SPECS.lock().unwrap().iter_mut().map(|spec| spec.fmt_fn.take().unwrap()).collect::<Vec<RawFunc>>();
 
+        let (lock, cvar) = &*pair_clone;
+        *lock.lock().unwrap() = true;
+        cvar.notify_one();
+
         for msg in rx {
             let idx: i32 = bincode::deserialize(&msg.data).unwrap();
             fns[idx as usize].invoke(msg);
         }
+        eprintln!("Logger thread exiting");
 
     });
-    // TODO: don't return until the thread is spawned
+
+    let (lock, cvar) = &*pair;
+    let mut started = lock.lock().unwrap();
+    while !*started {
+        started = cvar.wait(started).unwrap();
+    }
 }
 
-// TODO: shutdown logger/flush ??
+// TODO: shutdown logger/flush/poison pill ??
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Loggable {
@@ -120,8 +133,17 @@ impl From<i64> for Loggable {
 impl Display for Loggable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Loggable::I64(i) => write!(f, "{}", i),
-            Loggable::F64(i) => write!(f, "{}", i),
+            Loggable::I64(x) => Display::fmt(x, f),
+            Loggable::F64(x) => Display::fmt(x, f),
+        }
+    }
+}
+
+impl LowerExp for Loggable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Loggable::I64(x) => LowerExp::fmt(x, f),
+            Loggable::F64(x) => LowerExp::fmt(x, f),
         }
     }
 }
