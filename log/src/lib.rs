@@ -112,38 +112,47 @@ pub fn init_logger(id: usize) {
 // TODO: shutdown logger/flush/poison pill ??
 
 #[derive(Serialize, Deserialize, Debug)]
-pub enum Loggable {
+pub enum Loggable<'a> {
     I64(i64),
     F64(f64),
+    Str(&'a str),
     // TODO: Implement string slices
 }
 
-impl From<f64> for Loggable {
+impl <'a> From<f64> for Loggable<'a> {
     fn from(item: f64) -> Self {
         Loggable::F64(item)
     }
 }
 
-impl From<i64> for Loggable {
+impl <'a> From<i64> for Loggable<'a> {
     fn from(item: i64) -> Self {
         Loggable::I64(item)
     }
 }
 
-impl Display for Loggable {
+impl <'a> From<&'a str> for Loggable<'a> {
+    fn from(item: &'a str) -> Self {
+        Loggable::Str(item)
+    }
+}
+
+impl <'a> Display for Loggable<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Loggable::I64(x) => Display::fmt(x, f),
             Loggable::F64(x) => Display::fmt(x, f),
+            Loggable::Str(x) => Display::fmt(x, f),
         }
     }
 }
 
-impl LowerExp for Loggable {
+impl <'a> LowerExp for Loggable<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Loggable::I64(x) => LowerExp::fmt(x, f),
             Loggable::F64(x) => LowerExp::fmt(x, f),
+            Loggable::Str(x) => panic!("Not implemented"),
         }
     }
 }

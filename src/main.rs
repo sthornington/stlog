@@ -25,7 +25,7 @@ fn main() {
         let y = x * x;
         let z = y * y;
         let start = std::time::Instant::now();
-        log_data!(INFO, "THIS IS A VERY LONG BIT OF NONSENSE TEXT ON EVERY LOG LINE XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX i: {} f: {:.1} x: {:.1} y: {:.1} z: {:+e}", i, f, x, y, z);
+        log_data!(INFO, "THIS IS A VERY LONG BIT OF NONSENSE TEXT ON EVERY LOG LINE ({}) i: {} f: {:.1} x: {:.1} y: {:.1} z: {:+e}", if i % 2 == 0 { "EVENT" } else { "ODD" }, i, f, x, y, z);
         elapsed += start.elapsed();
         woob();
     }
