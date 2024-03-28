@@ -116,7 +116,6 @@ pub enum Loggable<'a> {
     I64(i64),
     F64(f64),
     Str(&'a str),
-    // TODO: Implement string slices
 }
 
 impl <'a> From<f64> for Loggable<'a> {
@@ -152,7 +151,7 @@ impl <'a> LowerExp for Loggable<'a> {
         match self {
             Loggable::I64(x) => LowerExp::fmt(x, f),
             Loggable::F64(x) => LowerExp::fmt(x, f),
-            Loggable::Str(x) => panic!("Not implemented"),
+            Loggable::Str(x) => panic!("Not implemented"), // not ideal, not sure how to fix
         }
     }
 }
