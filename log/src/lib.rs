@@ -1,5 +1,5 @@
 #![feature(type_alias_impl_trait)]
-use std::cell::OnceCell;
+use std::cell::{OnceCell, RefCell};
 use std::sync::{Arc, mpsc, Mutex};
 use std::sync::mpsc::{Receiver, Sender};
 use std::thread;
@@ -18,35 +18,6 @@ pub enum LogLevel {
     ERROR,
 }
 
-pub struct RawFunc {
-    data: Box<dyn Fn() + Send + 'static>,
-}
-
-impl RawFunc {
-    pub fn new<T>(data: T) -> Self
-        where
-            T: Fn() + Send + 'static,
-    {
-        RawFunc {
-            data: Box::new(data),
-        }
-    }
-
-    fn invoke(self) {
-        (self.data)()
-    }
-}
-
-pub struct LogLineSpec {
-    pub level: LogLevel,
-    pub fmt: &'static str,
-    pub log_ident: &'static str,
-    pub fmt_fn: RawFunc,
-    pub sender: OnceCell<Sender<Msg>>,
-}
-
-const MAX_SIZE: usize = 32;
-
 // TODO: switch to channel that can do variable size messages
 #[derive(Debug)]
 pub struct Msg {
@@ -59,8 +30,43 @@ impl Msg {
     }
 }
 
+
+pub struct RawFunc {
+    data: Box<dyn Fn(Msg) + Send + 'static>,
+}
+
+impl RawFunc {
+    pub fn new<T>(data: T) -> Self
+        where
+            T: Fn(Msg) + Send + 'static,
+    {
+        RawFunc {
+            data: Box::new(data),
+        }
+    }
+
+    fn invoke(&self, x: Msg) {
+        (self.data)(x)
+    }
+}
+
+pub struct LogLineSpec {
+    pub level: LogLevel,
+    pub fmt: &'static str,
+    pub log_ident: &'static str,
+    pub fmt_fn: Option<RawFunc>,
+}
+
+const MAX_SIZE: usize = 32;
+
 lazy_static! {
     pub static ref LOG_LINE_SPECS: Arc<Mutex<Vec<LogLineSpec>>> = Arc::new(Mutex::new(Vec::new()));
+    pub static ref SENDER: Arc<Mutex<Option<Sender<Msg>>>> = Arc::new(Mutex::new(None));
+}
+
+
+thread_local! {
+    pub static THREAD_LOCAL_SENDER: RefCell<Option<Sender<Msg>>> = RefCell::new(None);
 }
 
 pub fn add_log_line_spec(spec: LogLineSpec) -> usize {
@@ -74,24 +80,29 @@ pub fn init_logger(id: usize) {
     let core_id = core_affinity::CoreId { id };
     let (tx, rx): (mpsc::Sender<Msg>, Receiver<Msg>) = mpsc::channel();
 
-    // TODO can we find a way to share the sender so that each log line doesn't need the 8 bytes to do it?
-    for spec in LOG_LINE_SPECS.lock().unwrap().iter_mut() {
-        spec.sender.set(tx.clone()).unwrap();
-    }
+    SENDER.lock().unwrap().replace(tx);
 
     thread::spawn(move || {
         core_affinity::set_for_current(core_id);
+        // peel out all the formatting closures
+        let fns = LOG_LINE_SPECS.lock().unwrap().iter_mut().map(|spec| spec.fmt_fn.take().unwrap()).collect::<Vec<RawFunc>>();
 
-        for received in rx {
-            println!("Received: {:?}", received);
+        for msg in rx {
+            let idx: i32 = bincode::deserialize(&msg.data).unwrap();
+            fns[idx as usize].invoke(msg);
         }
+
     });
+    // TODO: don't return until the thread is spawned
 }
+
+// TODO: shutdown logger/flush ??
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Loggable {
     I64(i64),
     F64(f64),
+    // TODO: Implement string slices
 }
 
 impl From<f64> for Loggable {

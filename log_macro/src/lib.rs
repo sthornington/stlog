@@ -69,14 +69,10 @@ pub fn log_data(input: TokenStream) -> TokenStream {
         _ => panic!("Unsupported log level"),
     };
 
-    // Generate deserialize and log closure
-    let deserialize_and_log = quote! {
-        println!("TODO: deserialize and log closure");
-    };
-    println!("COMPILE {:?}", log_ident);
+    //println!("COMPILE {:?}", log_ident);
     //println!("COMPILE args len {:?}", args.len());
 
-    let tuple_types = args.iter().map(|_| {quote! { Loggable }}).collect::<Vec<_>>();
+    let tuple_types = args.iter().map(|_| {quote! { log::Loggable }}).collect::<Vec<_>>();
     //println!("COMPILE tuple_args len {:?}", tuple_args.len());
 
     // just the args variadic identifiers
@@ -112,12 +108,17 @@ pub fn log_data(input: TokenStream) -> TokenStream {
                 // TODO: in the serialization code SOMEHOW so it can push the args with a good
                 // TODO: dense id.
                 let fmt_str_copy = #format_str.clone();
-                let raw_func = log::RawFunc::new(move || { println!("TODO: deserialize and log args here with fmt {}", #format_str); } );
-                let id = log::add_log_line_spec(log::LogLineSpec { level: #level, fmt: fmt_str_copy, log_ident: #log_ident_str, fmt_fn: raw_func, sender: OnceCell::new() });
+                let raw_func = log::RawFunc::new(move |msg| {
+                    // Deserialize the tuple
+                    let (msg_idx, #(#vars),*) : ( i32, #(#tuple_types),* ) = bincode::deserialize(&msg.data).unwrap();
+                    assert!(msg_idx == idx.load(Ordering::Relaxed));
+                    println!(#format_str, #(#vars),* );
+                } );
+                let id = log::add_log_line_spec(log::LogLineSpec { level: #level, fmt: fmt_str_copy, log_ident: #log_ident_str, fmt_fn: Some(raw_func) });
                 if let Err(prev) = idx.compare_exchange(-1, id as i32, Ordering::Acquire, Ordering::Relaxed) {
                     panic!("log call site at {}:{}:{} has already been initialized to {}!", #path, #line, #col, prev);
                 } else {
-                    println!("log call site at {}:{}:{} successfully initialized with id {}!", #path, #line, #col, id);
+                    //println!("log call site at {}:{}:{} successfully initialized with id {}!", #path, #line, #col, id);
                 }
             }
             #[cfg(target_os = "linux")]
@@ -135,10 +136,10 @@ pub fn log_data(input: TokenStream) -> TokenStream {
     let serialize = quote! {
         let idx = #log_ident::idx.load(std::sync::atomic::Ordering::Relaxed);
         assert!(idx >= 0);
-        println!("TODO: serialize id {} and args here", idx);
+        //println!("TODO: serialize id {} and args here", idx);
         let t: ( i32, #( #tuple_types ),* ) = ( idx, #( #tuple_args_into ),* );
-        println!("RUN {:?}", t);
-        println!(#format_str, #(#args),*);
+        //println!("RUN {:?}", t);
+        //println!(#format_str, #(#args),*);
 
         let mut msg = log::Msg::new();
 
@@ -146,14 +147,17 @@ pub fn log_data(input: TokenStream) -> TokenStream {
         {
             bincode::serialize_into(&mut msg.data[..], &t).expect("Serialization failed");
         }
-        println!("Serialized data: {:?}", msg);
-        #log_ident::log_line_spec.get_or_insert_with(|| { log::LOG_LINE_SPECS.lock().unwrap()[idx as usize].sender.get().unwrap().clone() }).send(msg);
+        //println!("Serialized data: {:?}", msg);
 
-        // Deserialize the tuple
-        //let (idx2, #(#vars),*) : ( i32, #(#tuple_types),* ) = bincode::deserialize(&mut msg.data).unwrap();
+        log::THREAD_LOCAL_SENDER.with(|maybe_sender| {
+            if maybe_sender.borrow().is_none() {
+                *maybe_sender.borrow_mut() = Some(log::SENDER.lock().unwrap().as_ref().expect("stlog not initialized").clone());
+            }
+            if let Some(sender) = &*maybe_sender.borrow() {
+                sender.send(msg).unwrap();
+            }
+        });
 
-        //println!("RUN {:?} {:?}", idx2, #(#vars),* );
-        //println!(#format_str, #(#vars),* );
     };
 
 
