@@ -17,6 +17,7 @@ fn main() {
     log::init_logger(8);
 
     let mut elapsed: Duration = Duration::new(0, 0);
+    log_data!(INFO, "{:+e}", 5.5);
 
     const N: i64 = 100000;
     for i in 0..N {

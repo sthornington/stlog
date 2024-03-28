@@ -120,6 +120,10 @@ pub fn log_data(input: TokenStream) -> TokenStream {
 
     // Generate serialization code
     let serialize = quote! {
+        if false {
+            // put this here just to force the compile time format type checking
+            println!(#format_str, #(#args),* );
+        }
         // TODO: CHECK LOG LEVEL IN HERE AND DO NOTHING IF IT'S TOO LOW
         let idx = #log_ident::idx.load(std::sync::atomic::Ordering::Relaxed);
         assert!(idx >= 0);
