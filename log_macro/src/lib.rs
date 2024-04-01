@@ -6,6 +6,7 @@ use proc_macro::{Literal, Span, TokenStream};
 use quote::{quote, format_ident};
 use syn::{parse_macro_input, LitStr, parse::Parse, parse::ParseStream, Token, Expr, Ident, LitInt};
 use constructor::constructor;
+use std::io::Cursor;
 
 struct LogMacroInput {
     level: Ident,
@@ -90,16 +91,16 @@ pub fn log_data(input: TokenStream) -> TokenStream {
             use std::sync::atomic::{AtomicI32, Ordering};
             use std::cell::OnceCell;
             use std::sync::mpsc::{Receiver, Sender};
+            use std::io::Cursor;
 
             pub static idx: AtomicI32 = AtomicI32::new(-1);
-            pub static mut log_line_spec: Option<Sender<log::Msg>> = None;
             pub static level: log::LogLevel = #level;
 
             pub extern "C" fn #log_ident_impl() {
                 let fmt_str_copy = #format_str.clone();
-                let raw_func = log::RawFunc::new(move |msg| {
+                let raw_func = log::RawFunc::new(move |data| {
                     // Deserialize the tuple
-                    let (msg_idx, #(#vars),*) : ( i32, #(#tuple_types),* ) = bincode::deserialize(&msg.data).unwrap();
+                    let (msg_idx, #(#vars),*) : ( i32, #(#tuple_types),* ) = bincode::deserialize(&data).unwrap();
                     assert!(msg_idx == idx.load(Ordering::Relaxed));
                     println!(#format_str, #(#vars),* );
                 } );
@@ -129,20 +130,31 @@ pub fn log_data(input: TokenStream) -> TokenStream {
             let idx = #log_ident::idx.load(std::sync::atomic::Ordering::Relaxed);
             assert!(idx >= 0);
             let t: ( i32, #( #tuple_types ),* ) = ( idx, #( #tuple_args_into ),* );
+            log::THREAD_LOCAL.with(|maybe_tls| {
+                if maybe_tls.borrow().is_none() {
+                    // create this thread's TLS
+                    let (mut w, mut r) = cueue::cueue(1 << 20).unwrap();
 
-            let mut msg = log::Msg::new();
-
-            {
-                assert!(bincode::serialized_size(&t).unwrap() < log::MAX_SIZE as u64, "Data too large to serialize");
-                bincode::serialize_into(&mut msg.data[..], &t).expect("Serialization failed");
-            }
-
-            log::THREAD_LOCAL_SENDER.with(|maybe_sender| {
-                if maybe_sender.borrow().is_none() {
-                    *maybe_sender.borrow_mut() = Some(log::SENDER.lock().unwrap().as_ref().expect("stlog not initialized").clone());
+                    *maybe_tls.borrow_mut() = Some(log::TLSWrapper { sender: w });
+                    // send our reader to the logger thread
+                    log::SENDER.lock().unwrap().as_ref().expect("stlog not initialized").send(r).unwrap();
                 }
-                if let Some(sender) = &*maybe_sender.borrow() {
-                    sender.send(msg).unwrap();
+                if let Some(ref mut tls) = *maybe_tls.borrow_mut() {
+                    let mut chunk = tls.sender.write_chunk();
+
+                    // TODO change this to a proper header somehow
+                    let mut required_size: u32 = 0;
+                    let size_size = bincode::serialized_size(&required_size).unwrap() as u32;
+
+                    required_size = size_size + (bincode::serialized_size(&t).unwrap() as u32);
+                    assert!(required_size < chunk.len() as u32, "Data too large to serialize");
+                    //println!("BEFORE WRITE CHUNK {:?}.", &chunk[..(required_size as usize)]);
+                    bincode::serialize_into(&mut chunk[..(size_size as usize)], &required_size).unwrap();
+                    //println!("AFTER WRITE CHUNK {:?}.", &chunk[..(required_size as usize)]);
+                    bincode::serialize_into(&mut chunk[(size_size as usize)..(required_size as usize)], &t).expect("Serialization failed");
+                    //println!("Serializing required_size {} size_size {} bytes idx {} WRITE CHUNK {:?}.", required_size, size_size, idx, &chunk[..required_size as usize]);
+                    tls.sender.commit(required_size as usize);
+
                 }
             });
         }

@@ -1,6 +1,6 @@
 workspace = { members = [ "log","log_macro"] }
 [package]
-name = "stlog_workspace"
+name = "stlog"
 version = "0.1.0"
 edition = "2021"
 
@@ -16,3 +16,4 @@ serde_derive = "*"
 serde_json = "*"
 constructor = "*"
 lazy_static = "*"
+cueue = "*"

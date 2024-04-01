@@ -21,34 +21,21 @@ pub enum LogLevel {
     ERROR,
 }
 
-// TODO: switch to channel that can do variable size messages
-#[derive(Debug)]
-pub struct Msg {
-    pub data: [u8; MAX_SIZE],
-}
-
-impl Msg {
-    pub fn new() -> Self {
-        Msg { data: [0; MAX_SIZE] }
-    }
-}
-
-
 pub struct RawFunc {
-    data: Box<dyn Fn(Msg) + Send + 'static>,
+    data: Box<dyn Fn(&[u8]) + Send + 'static>,
 }
 
 impl RawFunc {
     pub fn new<T>(data: T) -> Self
         where
-            T: Fn(Msg) + Send + 'static,
+            T: Fn(&[u8]) + Send + 'static,
     {
         RawFunc {
             data: Box::new(data),
         }
     }
 
-    fn invoke(&self, x: Msg) {
+    fn invoke(&self, x: &[u8]) {
         (&self.data)(x)
     }
 }
@@ -64,11 +51,18 @@ pub const MAX_SIZE: usize = 256;
 
 lazy_static! {
     pub static ref LOG_LINE_SPECS: Arc<Mutex<Vec<LogLineSpec>>> = Arc::new(Mutex::new(Vec::new()));
-    pub static ref SENDER: Arc<Mutex<Option<Sender<Msg>>>> = Arc::new(Mutex::new(None));
+    pub static ref SENDER: Arc<Mutex<Option<Sender<ByteCueueReader>>>> = Arc::new(Mutex::new(None));
+}
+
+type ByteCueueWriter = cueue::Writer<u8>;
+type ByteCueueReader = cueue::Reader<u8>;
+
+pub struct TLSWrapper {
+    pub sender: ByteCueueWriter,
 }
 
 thread_local! {
-    pub static THREAD_LOCAL_SENDER: RefCell<Option<Sender<Msg>>> = RefCell::new(None);
+    pub static THREAD_LOCAL: RefCell<Option<TLSWrapper>> = RefCell::new(None);
 }
 
 pub fn add_log_line_spec(spec: LogLineSpec) -> usize {
@@ -83,12 +77,13 @@ pub fn init_logger(id: usize) {
     // TODO guard against multiple calls
     println!("init_logger called with cpu {}", id);
     let core_id = core_affinity::CoreId { id };
-    let (tx, rx): (mpsc::Sender<Msg>, Receiver<Msg>) = mpsc::channel();
+    let (tx, rx): (mpsc::Sender<ByteCueueReader>, Receiver<ByteCueueReader>) = mpsc::channel();
 
     SENDER.lock().unwrap().replace(tx);
 
     thread::spawn(move || {
         core_affinity::set_for_current(core_id);
+        let mut log_streams: Vec<ByteCueueReader> = Vec::new();
         // peel out all the formatting closures
         let fns = LOG_LINE_SPECS.lock().unwrap().iter_mut().map(|spec| spec.fmt_fn.take().unwrap()).collect::<Vec<RawFunc>>();
 
@@ -96,9 +91,43 @@ pub fn init_logger(id: usize) {
         *lock.lock().unwrap() = true;
         cvar.notify_one();
 
-        for msg in rx {
-            let idx: i32 = bincode::deserialize(&msg.data).unwrap();
-            fns[idx as usize].invoke(msg);
+        for i in 0.. {
+            let mut j = 0;
+            while j < log_streams.len() {
+                let mut dead_and_drained = false;
+                {
+                    {
+                        let mut chunk = log_streams[j].read_chunk();
+                        let mut chunk_idx = 0;
+
+                        while chunk_idx < chunk.len() {
+                            //println!("READ chunk {:?}", chunk);
+                            let size: u32 = bincode::deserialize(&chunk[chunk_idx..]).unwrap();
+                            // TODO: proper header handling
+                            // TODO: encode size_size here too??
+                            let msg_idx: i32 = bincode::deserialize(&chunk[(chunk_idx + 4)..]).unwrap();
+                            //println!("Got a message of size {} with index {}", size, msg_idx);
+                            fns[msg_idx as usize].invoke(&chunk[(chunk_idx + 4)..(chunk_idx + size as usize)]);
+                            chunk_idx += size as usize;
+                        }
+                        assert!(chunk_idx == chunk.len());
+                        dead_and_drained = chunk.len() == 0 && log_streams[j].is_abandoned();
+                    }
+                    log_streams[j].commit();
+                }
+                if dead_and_drained {
+                    println!("Cleaning up a reader");
+                    log_streams.swap_remove(j);
+                } else {
+                    j += 1;
+                }
+            }
+            if i % 64 == 0 {
+                for reader in rx.try_iter() {
+                    println!("Got a new reader");
+                    log_streams.push(reader);
+                }
+            }
         }
         eprintln!("Logger thread exiting");
 
