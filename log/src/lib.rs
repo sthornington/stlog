@@ -6,13 +6,16 @@ use std::thread;
 use lazy_static::lazy_static;
 use core_affinity;
 use std::fmt::{Debug, Display, LowerExp};
+use std::sync::atomic::Ordering;
+use atomic_enum::atomic_enum;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_derive::{Deserialize, Serialize};
 
-#[derive(Debug)]
+#[atomic_enum]
+#[derive(PartialEq,PartialOrd)]
 pub enum LogLevel {
-    DEBUG,
+    DEBUG = 0,
     INFO,
     WARN,
     ERROR,
@@ -64,7 +67,6 @@ lazy_static! {
     pub static ref SENDER: Arc<Mutex<Option<Sender<Msg>>>> = Arc::new(Mutex::new(None));
 }
 
-
 thread_local! {
     pub static THREAD_LOCAL_SENDER: RefCell<Option<Sender<Msg>>> = RefCell::new(None);
 }
@@ -107,6 +109,16 @@ pub fn init_logger(id: usize) {
     while !*started {
         started = cvar.wait(started).unwrap();
     }
+}
+
+static LOG_LEVEL: AtomicLogLevel = AtomicLogLevel::new(LogLevel::DEBUG);
+
+pub fn set_log_level(level: LogLevel) {
+    LOG_LEVEL.store(level, Ordering::Relaxed);
+}
+
+pub fn get_log_level() -> LogLevel {
+    LOG_LEVEL.load(Ordering::Relaxed)
 }
 
 // TODO: shutdown logger/flush/poison pill ??

@@ -93,6 +93,7 @@ pub fn log_data(input: TokenStream) -> TokenStream {
 
             pub static idx: AtomicI32 = AtomicI32::new(-1);
             pub static mut log_line_spec: Option<Sender<log::Msg>> = None;
+            pub static level: log::LogLevel = #level;
 
             pub extern "C" fn #log_ident_impl() {
                 let fmt_str_copy = #format_str.clone();
@@ -124,26 +125,27 @@ pub fn log_data(input: TokenStream) -> TokenStream {
             // put this here just to force the compile time format type checking
             println!(#format_str, #(#args),* );
         }
-        // TODO: CHECK LOG LEVEL IN HERE AND DO NOTHING IF IT'S TOO LOW
-        let idx = #log_ident::idx.load(std::sync::atomic::Ordering::Relaxed);
-        assert!(idx >= 0);
-        let t: ( i32, #( #tuple_types ),* ) = ( idx, #( #tuple_args_into ),* );
+        if log::get_log_level() <= #level {
+            let idx = #log_ident::idx.load(std::sync::atomic::Ordering::Relaxed);
+            assert!(idx >= 0);
+            let t: ( i32, #( #tuple_types ),* ) = ( idx, #( #tuple_args_into ),* );
 
-        let mut msg = log::Msg::new();
+            let mut msg = log::Msg::new();
 
-        {
-            assert!(bincode::serialized_size(&t).unwrap() < log::MAX_SIZE as u64, "Data too large to serialize");
-            bincode::serialize_into(&mut msg.data[..], &t).expect("Serialization failed");
+            {
+                assert!(bincode::serialized_size(&t).unwrap() < log::MAX_SIZE as u64, "Data too large to serialize");
+                bincode::serialize_into(&mut msg.data[..], &t).expect("Serialization failed");
+            }
+
+            log::THREAD_LOCAL_SENDER.with(|maybe_sender| {
+                if maybe_sender.borrow().is_none() {
+                    *maybe_sender.borrow_mut() = Some(log::SENDER.lock().unwrap().as_ref().expect("stlog not initialized").clone());
+                }
+                if let Some(sender) = &*maybe_sender.borrow() {
+                    sender.send(msg).unwrap();
+                }
+            });
         }
-
-        log::THREAD_LOCAL_SENDER.with(|maybe_sender| {
-            if maybe_sender.borrow().is_none() {
-                *maybe_sender.borrow_mut() = Some(log::SENDER.lock().unwrap().as_ref().expect("stlog not initialized").clone());
-            }
-            if let Some(sender) = &*maybe_sender.borrow() {
-                sender.send(msg).unwrap();
-            }
-        });
 
     };
 

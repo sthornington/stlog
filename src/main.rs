@@ -15,11 +15,12 @@ use crate::another::woob;
 
 fn main() {
     log::init_logger(8);
+    log::set_log_level(log::LogLevel::INFO);
 
     let mut elapsed: Duration = Duration::new(0, 0);
     log_data!(INFO, "{:+e}", 5.5);
 
-    const N: i64 = 100000;
+    const N: i64 = 10;
     for i in 0..N {
         let f = i as f64;
         let x = f * f;
