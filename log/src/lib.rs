@@ -8,9 +8,6 @@ use core_affinity;
 use std::fmt::{Debug, Display, LowerExp};
 use std::sync::atomic::Ordering;
 use atomic_enum::atomic_enum;
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
-use serde_derive::{Deserialize, Serialize};
 
 #[atomic_enum]
 #[derive(PartialEq,PartialOrd)]
@@ -22,20 +19,20 @@ pub enum LogLevel {
 }
 
 pub struct RawFunc {
-    data: Box<dyn Fn(&[u8]) + Send + 'static>,
+    data: Box<dyn Fn(&[u8]) -> usize + Send + 'static>,
 }
 
 impl RawFunc {
     pub fn new<T>(data: T) -> Self
         where
-            T: Fn(&[u8]) + Send + 'static,
+            T: Fn(&[u8]) -> usize + Send + 'static,
     {
         RawFunc {
             data: Box::new(data),
         }
     }
 
-    fn invoke(&self, x: &[u8]) {
+    fn invoke(&self, x: &[u8]) -> usize {
         (&self.data)(x)
     }
 }
@@ -97,18 +94,15 @@ pub fn init_logger(id: usize) {
                 let mut dead_and_drained = false;
                 {
                     {
-                        let mut chunk = log_streams[j].read_chunk();
+                        let chunk = log_streams[j].read_chunk();
                         let mut chunk_idx = 0;
 
                         while chunk_idx < chunk.len() {
                             //println!("READ chunk {:?}", chunk);
-                            let size: u32 = bincode::deserialize(&chunk[chunk_idx..]).unwrap();
-                            // TODO: proper header handling
-                            // TODO: encode size_size here too??
-                            let msg_idx: i32 = bincode::deserialize(&chunk[(chunk_idx + 4)..]).unwrap();
+                            let (msg_idx, _) = bincode::decode_from_slice::<i32, _>(&chunk[chunk_idx..], bincode::config::legacy()).unwrap();
                             //println!("Got a message of size {} with index {}", size, msg_idx);
-                            fns[msg_idx as usize].invoke(&chunk[(chunk_idx + 4)..(chunk_idx + size as usize)]);
-                            chunk_idx += size as usize;
+                            let read = fns[msg_idx as usize].invoke(&chunk[chunk_idx..]);
+                            chunk_idx += read as usize;
                         }
                         assert!(chunk_idx == chunk.len());
                         dead_and_drained = chunk.len() == 0 && log_streams[j].is_abandoned();
@@ -152,7 +146,7 @@ pub fn get_log_level() -> LogLevel {
 
 // TODO: shutdown logger/flush/poison pill ??
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(bincode::Encode, bincode::BorrowDecode, Debug)]
 pub enum Loggable<'a> {
     I64(i64),
     F64(f64),
@@ -192,7 +186,7 @@ impl <'a> LowerExp for Loggable<'a> {
         match self {
             Loggable::I64(x) => LowerExp::fmt(x, f),
             Loggable::F64(x) => LowerExp::fmt(x, f),
-            Loggable::Str(x) => panic!("Not implemented"), // not ideal, not sure how to fix
+            Loggable::Str(_) => panic!("Not implemented"), // not ideal, not sure how to fix
         }
     }
 }

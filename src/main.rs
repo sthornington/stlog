@@ -10,8 +10,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
+
 use log::Loggable;
 use crate::another::woob;
 
@@ -34,7 +33,7 @@ fn main() {
 
         for i in 0..1000 {
             log_data!(INFO, "XXX foo {}", i);
-            sleep(std::time::Duration::from_micros(1));
+            //sleep(std::time::Duration::from_micros(1));
         }
         log_data!(INFO, "XXX Exiting thread");
     });
@@ -55,9 +54,10 @@ fn main() {
         let z = y * y;
         let start = std::time::Instant::now();
         log_data!(INFO, "THIS IS A VERY LONG BIT OF NONSENSE TEXT ON EVERY LOG LINE ({}) i: {} f: {:.1} x: {:.1} y: {:.1} z: {:+e}", if i % 2 == 0 { "EVEN" } else { "ODD" }, i, f, x, y, z);
+        //log_data!(INFO, "THIS IS A VERY LONG BIT OF NONSENSE TEXT ON EVERY LOG LINE {}", 4);
         elapsed += start.elapsed();
         woob();
-        sleep(std::time::Duration::from_micros(1));
+        //sleep(std::time::Duration::from_micros(1));
 
     }
 

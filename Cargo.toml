@@ -9,11 +9,12 @@ edition = "2021"
 [dependencies]
 log = { path = "log" }
 log_macro = { path = "log_macro" }
-
-serde = "*"
-bincode = "*"
-serde_derive = "*"
-serde_json = "*"
-constructor = "*"
-lazy_static = "*"
+bincode = { version = "2.0.0-rc.3" }
 cueue = "*"
+#serde = "*"
+#bincode = "2"
+#serde_derive = "*"
+#serde_json = "*"
+#constructor = "*"
+#lazy_static = "*"
+#cueue = "*"

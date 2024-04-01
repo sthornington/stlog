@@ -79,8 +79,6 @@ pub fn log_data(input: TokenStream) -> TokenStream {
     // Register static stuff
     let register = quote! {
         use std::fmt::Debug;
-        use serde::de::DeserializeOwned;
-        use serde::Serialize;
 
         // taken from constructor crate, but without the super:: since our function is local
         pub mod #log_ident {
@@ -92,6 +90,7 @@ pub fn log_data(input: TokenStream) -> TokenStream {
             use std::cell::OnceCell;
             use std::sync::mpsc::{Receiver, Sender};
             use std::io::Cursor;
+            use bincode::BorrowDecode;
 
             pub static idx: AtomicI32 = AtomicI32::new(-1);
             pub static level: log::LogLevel = #level;
@@ -100,9 +99,10 @@ pub fn log_data(input: TokenStream) -> TokenStream {
                 let fmt_str_copy = #format_str.clone();
                 let raw_func = log::RawFunc::new(move |data| {
                     // Deserialize the tuple
-                    let (msg_idx, #(#vars),*) : ( i32, #(#tuple_types),* ) = bincode::deserialize(&data).unwrap();
+                    let ((msg_idx, #(#vars),*), bytes_read) : ((i32, #(#tuple_types),*), usize) = bincode::borrow_decode_from_slice(&data, bincode::config::legacy()).unwrap();
                     assert!(msg_idx == idx.load(Ordering::Relaxed));
                     println!(#format_str, #(#vars),* );
+                    bytes_read
                 } );
                 let id = log::add_log_line_spec(log::LogLineSpec { level: #level, fmt: fmt_str_copy, log_ident: #log_ident_str, fmt_fn: Some(raw_func) });
                 if let Err(prev) = idx.compare_exchange(-1, id as i32, Ordering::Acquire, Ordering::Relaxed) {
@@ -132,6 +132,7 @@ pub fn log_data(input: TokenStream) -> TokenStream {
             let t: ( i32, #( #tuple_types ),* ) = ( idx, #( #tuple_args_into ),* );
             log::THREAD_LOCAL.with(|maybe_tls| {
                 if maybe_tls.borrow().is_none() {
+                    use cueue;
                     // create this thread's TLS
                     let (mut w, mut r) = cueue::cueue(1 << 20).unwrap();
 
@@ -142,18 +143,9 @@ pub fn log_data(input: TokenStream) -> TokenStream {
                 if let Some(ref mut tls) = *maybe_tls.borrow_mut() {
                     let mut chunk = tls.sender.write_chunk();
 
-                    // TODO change this to a proper header somehow
-                    let mut required_size: u32 = 0;
-                    let size_size = bincode::serialized_size(&required_size).unwrap() as u32;
-
-                    required_size = size_size + (bincode::serialized_size(&t).unwrap() as u32);
-                    assert!(required_size < chunk.len() as u32, "Data too large to serialize");
-                    //println!("BEFORE WRITE CHUNK {:?}.", &chunk[..(required_size as usize)]);
-                    bincode::serialize_into(&mut chunk[..(size_size as usize)], &required_size).unwrap();
-                    //println!("AFTER WRITE CHUNK {:?}.", &chunk[..(required_size as usize)]);
-                    bincode::serialize_into(&mut chunk[(size_size as usize)..(required_size as usize)], &t).expect("Serialization failed");
+                    let written = bincode::encode_into_slice(&t, chunk, bincode::config::legacy()).expect("Serialization failed");
                     //println!("Serializing required_size {} size_size {} bytes idx {} WRITE CHUNK {:?}.", required_size, size_size, idx, &chunk[..required_size as usize]);
-                    tls.sender.commit(required_size as usize);
+                    tls.sender.commit(written);
 
                 }
             });
