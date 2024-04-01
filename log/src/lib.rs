@@ -144,8 +144,6 @@ pub fn get_log_level() -> LogLevel {
     LOG_LEVEL.load(Ordering::Relaxed)
 }
 
-// TODO: shutdown logger/flush/poison pill ??
-
 #[derive(bincode::Encode, bincode::BorrowDecode, Debug)]
 pub enum Loggable<'a> {
     I64(i64),
