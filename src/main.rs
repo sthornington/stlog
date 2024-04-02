@@ -15,12 +15,12 @@ use log::Loggable;
 use crate::another::woob;
 
 fn main() {
-    log::init_logger(8);
+    log::init_logger(1);
     log::set_log_level(log::LogLevel::INFO);
 
     log_data!(INFO, "XXX {:+e}", 5.5);
 
-    const N: usize = 100000;
+    const N: usize = 10000;
 
     let pair = Arc::new((Mutex::new(false), Condvar::new()));
     let pair_clone = pair.clone();
@@ -30,9 +30,9 @@ fn main() {
         *lock.lock().unwrap() = true;
         cvar.notify_one();
 
-        for i in 0..1000 {
+        for i in 0..10000 {
             log_data!(INFO, "XXX foo {}", i);
-            //sleep(std::time::Duration::from_micros(1));
+            sleep(std::time::Duration::from_micros(1));
         }
         log_data!(INFO, "XXX Exiting thread");
     });
@@ -57,14 +57,14 @@ fn main() {
         zes[i] = yes[i] * yes[i];
         woob(i);
     }
-    let start = std::time::Instant::now();
     for i in 0..N {
+        let start = std::time::Instant::now();
         log_data!(INFO, "THIS IS A VERY LONG BIT OF NONSENSE TEXT ON EVERY LOG LINE ({}) i: {} f: {:.1} x: {:.1} y: {:.1} z: {:+e}", if i % 2 == 0 { "EVEN" } else { "ODD" }, (i as i64), fes[i], xes[i], yes[i], zes[i]);
         //println!("THIS IS A VERY LONG BIT OF NONSENSE TEXT ON EVERY LOG LINE ({}) i: {} f: {:.1} x: {:.1} y: {:.1} z: {:+e}", if i % 2 == 0 { "EVEN" } else { "ODD" }, i, f, x, y, z);
         //log_data!(INFO, "THIS IS A VERY LONG BIT OF NONSENSE TEXT ON EVERY LOG LINE");
-        //sleep(std::time::Duration::from_micros(1));
+        elapsed += start.elapsed();
+        sleep(std::time::Duration::from_micros(10));
     }
-    elapsed += start.elapsed();
 
     println!("XXX log cost {:?}", elapsed / N as u32);
 

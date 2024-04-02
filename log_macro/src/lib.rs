@@ -97,11 +97,11 @@ pub fn log_data(input: TokenStream) -> TokenStream {
 
             pub extern "C" fn #log_ident_impl() {
                 let fmt_str_copy = #format_str.clone();
-                let raw_func = log::RawFunc::new(move |data| {
+                let raw_func = log::RawFunc::new(move |stdout, data| {
                     // Deserialize the tuple
                     let ((msg_idx, #(#vars),*), bytes_read) : ((i32, #(#tuple_types),*), usize) = bincode::borrow_decode_from_slice(&data, bincode::config::legacy()).unwrap();
                     assert!(msg_idx == idx.load(Ordering::Relaxed));
-                    println!(#format_str, #(#vars),* );
+                    writeln!(stdout, #format_str, #(#vars),* );
                     bytes_read
                 } );
                 let id = log::add_log_line_spec(log::LogLineSpec { level: #level, fmt: fmt_str_copy, log_ident: #log_ident_str, fmt_fn: Some(raw_func) });

@@ -6,6 +6,7 @@ use std::thread;
 use lazy_static::lazy_static;
 use core_affinity;
 use std::fmt::{Debug, Display, LowerExp};
+use std::io::{StdoutLock, Write};
 use std::sync::atomic::Ordering;
 use atomic_enum::atomic_enum;
 
@@ -19,21 +20,21 @@ pub enum LogLevel {
 }
 
 pub struct RawFunc {
-    data: Box<dyn Fn(&[u8]) -> usize + Send + 'static>,
+    data: Box<dyn Fn(&mut dyn Write, &[u8]) -> usize + Send + 'static>,
 }
 
 impl RawFunc {
     pub fn new<T>(data: T) -> Self
         where
-            T: Fn(&[u8]) -> usize + Send + 'static,
+            T: Fn(&mut dyn Write, &[u8]) -> usize + Send + 'static,
     {
         RawFunc {
             data: Box::new(data),
         }
     }
 
-    fn invoke(&self, x: &[u8]) -> usize {
-        (&self.data)(x)
+    fn invoke(&self, w: &mut dyn Write, x: &[u8]) -> usize {
+        (&self.data)(w, x)
     }
 }
 
@@ -90,6 +91,8 @@ pub fn init_logger(id: usize) {
 
         for i in 0.. {
             let mut j = 0;
+            //println!("Looped");
+            let mut stdout_lock: Option<StdoutLock> = None;
             while j < log_streams.len() {
                 let mut dead_and_drained = false;
                 {
@@ -98,10 +101,13 @@ pub fn init_logger(id: usize) {
                         let mut chunk_idx = 0;
 
                         while chunk_idx < chunk.len() {
+                            if stdout_lock.is_none() {
+                                stdout_lock = Some(std::io::stdout().lock());
+                            }
                             //println!("READ chunk {:?}", chunk);
                             let (msg_idx, _) = bincode::decode_from_slice::<i32, _>(&chunk[chunk_idx..], bincode::config::legacy()).unwrap();
                             //println!("Got a message of size {} with index {}", size, msg_idx);
-                            let read = fns[msg_idx as usize].invoke(&chunk[chunk_idx..]);
+                            let read = fns[msg_idx as usize].invoke(stdout_lock.as_mut().unwrap(), &chunk[chunk_idx..]);
                             chunk_idx += read as usize;
                         }
                         assert!(chunk_idx == chunk.len());
