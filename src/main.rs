@@ -20,8 +20,7 @@ fn main() {
 
     log_data!(INFO, "XXX {:+e}", 5.5);
 
-    const N: i64 = 10000;
-
+    const N: usize = 100000;
 
     let pair = Arc::new((Mutex::new(false), Condvar::new()));
     let pair_clone = pair.clone();
@@ -47,20 +46,25 @@ fn main() {
 
     let mut elapsed: Duration = Duration::new(0, 0);
 
+    let mut fes = [0.0f64; N as usize];
+    let mut xes = [0.0f64; N as usize];
+    let mut yes = [0.0f64; N as usize];
+    let mut zes = [0.0f64; N as usize];
     for i in 0..N {
-        let f = i as f64;
-        let x = f * f;
-        let y = x * x;
-        let z = y * y;
-        let start = std::time::Instant::now();
-        log_data!(INFO, "THIS IS A VERY LONG BIT OF NONSENSE TEXT ON EVERY LOG LINE ({}) i: {} f: {:.1} x: {:.1} y: {:.1} z: {:+e}", if i % 2 == 0 { "EVEN" } else { "ODD" }, i, f, x, y, z);
+        fes[i] = i as f64;
+        xes[i] = fes[i] * fes[i];
+        yes[i] = xes[i] * xes[i];
+        zes[i] = yes[i] * yes[i];
+        woob(i);
+    }
+    let start = std::time::Instant::now();
+    for i in 0..N {
+        log_data!(INFO, "THIS IS A VERY LONG BIT OF NONSENSE TEXT ON EVERY LOG LINE ({}) i: {} f: {:.1} x: {:.1} y: {:.1} z: {:+e}", if i % 2 == 0 { "EVEN" } else { "ODD" }, (i as i64), fes[i], xes[i], yes[i], zes[i]);
         //println!("THIS IS A VERY LONG BIT OF NONSENSE TEXT ON EVERY LOG LINE ({}) i: {} f: {:.1} x: {:.1} y: {:.1} z: {:+e}", if i % 2 == 0 { "EVEN" } else { "ODD" }, i, f, x, y, z);
         //log_data!(INFO, "THIS IS A VERY LONG BIT OF NONSENSE TEXT ON EVERY LOG LINE");
-        elapsed += start.elapsed();
-        woob();
         //sleep(std::time::Duration::from_micros(1));
-
     }
+    elapsed += start.elapsed();
 
     println!("XXX log cost {:?}", elapsed / N as u32);
 
